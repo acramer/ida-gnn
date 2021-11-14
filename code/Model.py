@@ -4,7 +4,6 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
-import wandb
 from Network import MyNetwork
 from os import path
 from DataLoader import parse_data, load_data
@@ -129,6 +128,7 @@ class MyModel(object):
 
             # Print if no logger
             if self.configs.wandb:
+                import wandb
                 wandb.log({"training accuracy":train_accuracy}, step=global_step)
                 if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)

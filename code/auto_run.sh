@@ -1,6 +1,9 @@
 . ~/miniconda3/etc/profile.d/conda.sh
 conda activate ida
 
+echo 'WORKDED' > runlog.txt
+mv runlog.txt best_model/model.th
+
 # # LR ~ 3hr -> 3hr
 # python main.py  -sdE 30 -B 128  -L 0.1    -A 'dla' --des dla_b128_1L1_sgd_plat
 # python main.py  -sdE 30 -B 128  -L 0.01   -A 'dla' --des dla_b128_2L1_sgd_plat
