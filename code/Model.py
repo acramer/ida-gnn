@@ -59,8 +59,9 @@ class MyModel(object):
         # Wandb setup
         if self.configs.wandb:
             # Initialize Model Name
+            import wandb
             name = self.name if self.name is not None else 'MyModel'
-            wandb.init(name=name, config=self.configs, dir=self.configs.log_directory, project="DL-project")
+            wandb.init(name=name, config=self.configs, dir=self.configs.log_directory, project="cycle-1", entity="btho-ida")
             wandb.watch(self.network)
 
         # Number of batches per epoch.  Used for logging to normalize data for epochs
@@ -128,7 +129,6 @@ class MyModel(object):
 
             # Print if no logger
             if self.configs.wandb:
-                import wandb
                 wandb.log({"training accuracy":train_accuracy}, step=global_step)
                 if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)

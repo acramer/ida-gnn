@@ -26,35 +26,35 @@ test:
 gpu: test setup-gpu
 	echo [MAKE - gpu]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh alan --command 'nohup ./DL-project/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh alan --command 'nohup ./ida-gnn/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 gpu-next: check-gpu
 	echo [MAKE - gpu-soft-kill]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh alan --command 'nohup ./DL-project/scripts/cloud_next.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh alan --command 'nohup ./ida-gnn/scripts/cloud_next.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 over-gpu: setup-gpu
 	echo [MAKE - over-gpu]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh alan --command 'nohup ./DL-project/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh alan --command 'nohup ./ida-gnn/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 under-gpu:
 	echo [MAKE - under-gpu]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh alan --command 'nohup ./DL-project/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh alan --command 'nohup ./ida-gnn/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 setup-gpu:
 	echo [MAKE - gpu]
-	git diff-index --quiet HEAD code || (git add code && git commit -m 'gpu commit' && git push)
-	make gpu-soft-kill || echo "CPU already off"
+	git diff-index --quiet HEAD code || (git add code && git add ida.yml && git commit -m 'gpu commit' && git push)
+	make gpu-soft-kill || echo "GPU already off"
 	gcloud compute instances start alan
 
 check-gpu:
@@ -68,7 +68,7 @@ gpu-kill: check-gpu
 gpu-soft-kill: check-gpu
 	echo [MAKE - gpu-soft-kill]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh alan --command 'nohup ./DL-project/scripts/cloud_kill.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh alan --command 'nohup ./ida-gnn/scripts/cloud_kill.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
@@ -78,27 +78,27 @@ gpu-soft-kill: check-gpu
 cpu: test setup-cpu
 	echo [MAKE - cpu]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh hopper --command 'nohup ./DL-project/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh hopper --command 'nohup ./ida-gnn/scripts/cloud_script.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 cpu-next: check-cpu
 	echo [MAKE - gpu-soft-kill]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh hopper --command 'nohup ./DL-project/scripts/cloud_next.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh hopper --command 'nohup ./ida-gnn/scripts/cloud_next.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 predict-cpu: setup-cpu
 	echo [MAKE - predict-cpu]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh hopper --command 'nohup ./DL-project/scripts/cloud_predict.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh hopper --command 'nohup ./ida-gnn/scripts/cloud_predict.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done
 
 setup-cpu:
 	echo [MAKE - gpu]
-	git diff-index --quiet HEAD code || (git add code && git commit -m 'gpu commit' && git push)
+	git diff-index --quiet HEAD code || (git add code && git add ida.yml && git commit -m 'gpu commit' && git push)
 	make cpu-kill || echo "CPU already off"
 	gcloud compute instances start hopper
 
@@ -113,6 +113,6 @@ cpu-kill: check-cpu
 cpu-soft-kill: check-cpu
 	echo [MAKE - gpu-soft-kill]
 	for n in 1 2 3 4 5 ; do \
-	gcloud compute ssh hopper --command 'nohup ./DL-project/scripts/cloud_kill.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
+	gcloud compute ssh hopper --command 'nohup ./ida-gnn/scripts/cloud_kill.sh &> log.txt < /dev/null &' && echo 'SSH successful' && break; \
 	sleep 5; \
 	done

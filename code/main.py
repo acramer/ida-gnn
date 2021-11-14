@@ -15,7 +15,7 @@ def network_correctness(configs):
     #   here to allow correctness testing to use as small of data as possible and to be as fast as possible.
     num_data = 12
     num_classes = 3
-    #fake_input_shape = (5, 5, 2)
+    # fake_input_shape = (5, 5, 2)
     fake_input_shape = (32, 32, 3)
 
     configs.epochs = 100
@@ -36,7 +36,7 @@ def network_correctness(configs):
     model.train(x_fake, y_fake)
     res = model.evaluate(x_fake, y_fake)
     print(res)
-    #return model.evaluate(x_fake, y_fake) > (1 - 1/num_classes)
+    # return model.evaluate(x_fake, y_fake) > (1 - 1/num_classes)
     return res > (1.5/num_classes)
 
 # Given a directory of model folders of the form "<NUM>_<DESCRIPTION>", creates and returns a new folder

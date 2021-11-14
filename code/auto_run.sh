@@ -1,8 +1,12 @@
 . ~/miniconda3/etc/profile.d/conda.sh
 conda activate ida
 
-echo 'WORKDED' > runlog.txt
+echo 'hello world' > runlog.txt
 mv runlog.txt best_model/model.th
+
+git add .
+git commit -m "GCP test"
+git push
 
 # # LR ~ 3hr -> 3hr
 # python main.py  -sdE 30 -B 128  -L 0.1    -A 'dla' --des dla_b128_1L1_sgd_plat
@@ -227,7 +231,7 @@ mv runlog.txt best_model/model.th
 # 
 # ACC=$(python main.py --mode test --load models/135-dla_se_D3/model.th)
 # 
-
+# 
 # cp models/models/135-dla_se_D3/model.th ../saved_models/model.th
 # cp models/models/135-dla_se_D3/model.th best_model/model.th
 # 
