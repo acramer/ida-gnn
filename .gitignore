@@ -1,3 +1,11 @@
+# Project ignore
+code/models/
+code/logs/
+code/data/
+code/playground.py
+**/.DS_Store
+.*.swp
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1,4 +1,3 @@
-### YOUR CODE HERE
 import torch
 import os
 import numpy as np
@@ -99,18 +98,3 @@ if __name__ == '__main__':
         else:
             exit(1)
 
-    elif configs.mode == 'predict':
-        model = MyModel(configs)
-
-        if configs.predict_directory is None:
-            raise Exception('The "load_directory" argument cannot be None.  Please specify a directory with "--load" flag')
-
-        x_test = load_testing_images(configs.predict_directory)
-        if configs.load_directory:
-            print_configs(model.load(configs.load_directory))
-
-        predictions = model.predict_prob(x_test)
-
-        np.save('predictions.npy', predictions)
-
-### END CODE HERE

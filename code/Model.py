@@ -1,4 +1,3 @@
-### YOUR CODE HERE
 import torch
 import torch.nn as nn
 import torchvision
@@ -9,9 +8,6 @@ from os import path
 from DataLoader import parse_data, load_data
 
 INPUT_SHAPE = (32, 32, 3)
-
-"""This script defines the training, validation and testing process.
-"""
 
 class MyModel(object):
 
@@ -49,10 +45,12 @@ class MyModel(object):
             else: 
                 train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
         else:
+            # TODO: change to dgl
             train_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=True, download=True, transform=transform)
             train_data = torch.utils.data.DataLoader(train_data, batch_size=self.configs.batch_size, shuffle=True, num_workers=2)
 
             if self.configs.validation:
+                # TODO: change to dgl
                 valid_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=valid_transform)
                 valid_data = torch.utils.data.DataLoader(valid_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
 
@@ -153,6 +151,7 @@ class MyModel(object):
         if self.configs.architecture == 'efficient': transform.transforms.insert(0,transforms.Resize(224))
 
         if test_data is None:
+            # TODO: change to dgl
             test_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=transform)
             test_data = torch.utils.data.DataLoader(test_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
         total_records = 0
@@ -289,4 +288,3 @@ class MyModel(object):
         return self.configs
 
 
-### END CODE HERE
