@@ -3,24 +3,61 @@ import torch.nn as nn
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
+
+import dgl.function as fn
+from sklearn.metrics import roc_auc_score
+
 from Network import MyNetwork
-from os import path
 from DataLoader import parse_data, load_data
 
-INPUT_SHAPE = (32, 32, 3)
+from os import path
+
+class DotPredictor(nn.Module):
+    def forward(self, g, h):
+        with g.local_scope():
+            g.ndata['h'] = h
+            g.apply_edges(fn.u_dot_v('h', 'h', 'score'))
+            return g.edata['score'][:, 0]
+
+class MLPPredictor(nn.Module):
+    def __init__(self, h_feats):
+        super().__init__()
+        self.W1 = nn.Linear(h_feats * 2, h_feats)
+        self.W2 = nn.Linear(h_feats, 1)
+
+    def apply_edges(self, edges):
+        h = torch.cat([edges.src['h'], edges.dst['h']], 1)
+        return {'score': self.W2(F.relu(self.W1(h))).squeeze(1)}
+
+    def forward(self, g, h):
+        with g.local_scope():
+            g.ndata['h'] = h
+            g.apply_edges(self.apply_edges)
+            return g.edata['score']
+
+def compute_auc(pos_score, neg_score):
+    scores = torch.cat([pos_score, neg_score]).numpy()
+    labels = torch.cat(
+        [torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
+    return roc_auc_score(labels, scores)
+
 
 class MyModel(object):
 
-    def __init__(self, configs, name=None, input_shape=INPUT_SHAPE):
+    def __init__(self, configs, name=None):
         self._device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
         self.configs = configs
-        self.input_shape = input_shape
         self.name = name
 
-        configs.input_shape = input_shape
-        self.network = MyNetwork(configs).to(self._device)
+        self.network = GraphSAGE(configs,train_g.ndata['feat'].shape[1], 16).to(self._device)
+        self.pred = DotPredictor()
 
-        self.configs.silent = self.configs.wandb if self.configs.wandb else self.configs.silent
+        self.configs.silent = self.configs.wandb or self.configs.silent
+
+        # TODO: REMOVE
+        self.input_shape = input_shape
+        configs.input_shape = input_shape
 
     def train(self, x_train=None, y_train=None, x_valid=None, y_valid=None):
 
@@ -63,11 +100,11 @@ class MyModel(object):
             wandb.watch(self.network)
 
         # Number of batches per epoch.  Used for logging to normalize data for epochs
-        num_steps_per_epoch = len(train_data)
+        # num_steps_per_epoch = len(train_data)
 
         # Optimizer
-        if self.configs.adam: optimizer = torch.optim.Adam(self.network.parameters(), lr=self.configs.learning_rate,               weight_decay=self.configs.weight_decay)
-        else:                 optimizer = torch.optim.SGD( self.network.parameters(), lr=self.configs.learning_rate, momentum=0.9, weight_decay=self.configs.weight_decay)
+        if self.configs.adam: optimizer = torch.optim.Adam(itertools.chain(model.parameters(), pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay)
+        else:                 optimizer = torch.optim.SGD( itertools.chain(model.parameters(), pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay, momentum=0.9)
 
         # Step Scheduler
         if self.configs.step_schedule:
@@ -75,29 +112,28 @@ class MyModel(object):
             else:                   scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10)
 
         # Criterion
-        loss = torch.nn.CrossEntropyLoss()
+        def loss(h):
+            pos_score = self.pred(train_pos_g, h)
+            neg_score = self.pred(train_neg_g, h)
+            scores = torch.cat([pos_score, neg_score])
+            labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])])
+            return F.binary_cross_entropy_with_logits(scores, labels)
 
-        if self.configs.wandb:
-            wandb.log({"training accuracy":1/self.configs.num_classes}, step=0)
-            if self.configs.validation: wandb.log({'validation accuracy':1/self.configs.num_classes, "generalization":1}, step=0)
+        # if self.configs.wandb:
+        #     wandb.log({"training accuracy":1/self.configs.num_classes}, step=0)
+        #     if self.configs.validation: wandb.log({'validation accuracy':1/self.configs.num_classes, "generalization":1}, step=0)
 
         if not self.configs.silent: print("--- Training Start ---")
         global_step = 0
         # Epoch Loop
         for i in range(self.configs.epochs):
             total_loss = 0.0
-            total_correct = 0
-            total_data = 0
             self.network.train()
             # Training Loop
             for img, label in train_data:
-                # Set X and Y to Device
-                img, label = img.to(self._device), label.to(self._device)
-
-                # Compute network logit
-                logit = self.network(img)
+            for global_step in range(100):
                 # Compute loss
-                loss_val = loss(logit, label)
+                loss_val = loss(model(train_g, train_g.ndata['feat']))
                 # Compute total correct predictions
                 total_correct += np.sum(np.argmax(logit.detach().cpu().numpy(), axis=1) == label.cpu().numpy())
                 total_data += img.shape[0]
@@ -117,22 +153,16 @@ class MyModel(object):
                 if self.configs.cosine: scheduler.step()
                 else:                   scheduler.step(total_loss)
 
-            # Compute Train Accuracy
-            if self.configs.validation: 
-                train_accuracy = total_correct/total_data
-                valid_accuracy = self.evaluate(test_data=valid_data)
-                generalization = valid_accuracy/train_accuracy
-            else:
-                train_accuracy = total_correct/len(x_train)
+            # TODO Compute ROC
 
             # Print if no logger
             if self.configs.wandb:
-                wandb.log({"training accuracy":train_accuracy}, step=global_step)
-                if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
+                # wandb.log({"training accuracy":train_accuracy}, step=global_step)
+                # if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)
             elif not self.configs.silent: 
-                print("Epoch: {:4d} -- Training Loss: {:10.6f} -- Accuracy: {:10.6f}".format(i, total_loss, train_accuracy), end='' if self.configs.validation else '\n')
-                if self.configs.validation: print(" -- Generalization: {:10.6f}".format(generalization))
+                print('Epoch: {:4d} -- Training Loss: {:10.6f}'.format(i, total_loss, train_accuracy), end='' if self.configs.validation else '\n')
+                if self.configs.validation: print(' -- Generalization: {:10.6f}'.format(generalization))
 
             if self.configs.save_interval is not None and self.configs.save_interval > 0 and i % self.configs.save_interval == 0 and i+1 < self.configs.epochs:
                 self.save('i{}'.format(i))
@@ -144,6 +174,14 @@ class MyModel(object):
         if not self.configs.silent: print("--- Training Complete ---")
 
     def evaluate(self, x=None, y=None, test_data=None):
+        # TODO:
+        # from sklearn.metrics import roc_auc_score
+        # with torch.no_grad():
+        #     pos_score = pred(test_pos_g, h)
+        #     neg_score = pred(test_neg_g, h)
+        #     print('AUC', compute_auc(pos_score, neg_score))
+        return 0
+
         transform=transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
@@ -174,81 +212,9 @@ class MyModel(object):
         return accuracy
         
     def predict(self, x):
-        # Check for invalid shapes of input
-        # Ensure the shape of the input
-        return np.argmax(self._predict_logit(x), axis=1)
-
-    def predict_prob(self, inputs):
-        if not isinstance(inputs, np.ndarray):
-            raise Exception('Invalid Type:{} | Numpy Array Expected'.format(type(x)))
-
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-        if self.configs.architecture == 'efficient': transform.transforms.insert(0,transforms.Resize(224))
-
-        # Set network to eval mode
-        self.network.eval()
-
-        logits = []
-
-        # Get predictions and return the percent correct as a decimal
-        if not self.configs.silent: print('--- Prediction Start ---')
-        for x in inputs:
-            x = transform(x)
-            img = x.reshape(-1,3,32,32).to(self._device)
-            logits.append(self._predict_logit(img))
-        if not self.configs.silent: print('--- Prediction Complete ---')
-
-        logits = np.concatenate(logits,axis=0)
-        predictions = torch.nn.functional.softmax(torch.tensor(logits),0).numpy()
-        return predictions
-
-    def _predict_logit(self, x):
-        flatten_shape = (self.input_shape[0]*self.input_shape[1]*self.input_shape[2],)
-        process_shape = (self.input_shape[2],*self.input_shape[:2])
-        if self.configs.architecture == 'efficient': process_shape = (self.input_shape[2],224,224)
-
-        # Check for invalid shapes of input for numpy and torch
-        # - Numpy array can be in flattened form as well
-        # - Torch tensor is assumed to have been processed
-        if isinstance(x, np.ndarray):
-            raise Exception('Invalid Type: Numpy Array')
-            if ( (x.shape != flatten_shape    and not (len(x.shape) == 2 and x.shape[1:] == flatten_shape)) and 
-                 (x.shape != self.input_shape and not (len(x.shape) == 4 and x.shape[1:] == self.input_shape)) ):
-                raise Exception('Invalid numpy array shape passed into MyModel.predict: {}'.format(x.shape))
-            x = x.reshape(-1,*self.input_shape)
-
-            # Transforms expected for raw images
-            pred_transform = transforms.Compose([transforms.ToPILImage(),
-                                                 transforms.ToTensor(),
-                                                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                                                 ])
-
-            if self.configs.architecture == 'efficient':
-                pred_transform = transforms.Compose([transforms.ToPILImage(),
-                                                     transforms.Resize(224),
-                                                     transforms.ToTensor(),
-                                                     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-                                                     ])
-
-            # Transforms applied for each image
-            imgs = []
-            for img in x:
-                imgs.append(pred_transform(img).reshape(-1,*process_shape))
-            x = torch.cat(imgs,0)
-
-        elif isinstance(x, torch.Tensor):
-            if x.shape != process_shape and not (len(x.shape) == 4 and x.shape[1:] == process_shape):
-                raise Exception('Invalid torch tensor shape passed into MyModel.predict: {}'.format(x.shape))
-            x = x.reshape(-1,*process_shape)
-
-        else:
-            raise Exception('Invalid type passed into MyModel.predict: {}'.format(type(x)))
-
-        self.network.eval()
-        return self.network(x).detach().cpu().numpy()
+        # TODO:
+        # return np.argmax(self._predict_logit(self.network(x).detach().cpu().numpy()), axis=1)
+        return None
 
     def save(self, des=''):
         from torch import save
@@ -256,6 +222,7 @@ class MyModel(object):
         from pathlib import Path
 
         # Save the configuration so that at load, different configs will not stop loading
+        # TODO: add pred
         checkpoint = {'configs':          self.configs,
                       'model_state_dict': self.network.state_dict()}
 
@@ -283,6 +250,7 @@ class MyModel(object):
 
         checkpoint = load(path.join(path.dirname(path.abspath(__file__)), filePath), map_location='cpu')
         update_configs(checkpoint['configs'])
+        # TODO: add pred
         self.network = MyNetwork(self.configs).to(self._device)
         self.network.load_state_dict(checkpoint['model_state_dict'])
         return self.configs
