@@ -1,6 +1,10 @@
 import os
-import pickle as pkl
+import dgl
+import torch
 import numpy as np
+import pandas as pd
+import pickle as pkl
+import scipy.sparse as sp
 from sklearn.datasets import make_classification
 from functools import reduce
 
@@ -47,16 +51,66 @@ def create_cora_graphs(save=False):
     
     return train_g, train_pos_g, train_neg_g, test_pos_g, test_neg_g
 
+def create_ida_graphs(date='08/27/2021',threshold=0.07,date_offset=0,test=False,save=False):
+    xndf = pd.read_csv('data/X_nodes.csv')
+    xedf = pd.read_csv('data/X_edges.csv')
+    yedf = pd.read_csv('data/Y_edges.csv')
+
+    xndf = xndf[xndf['date']==date]
+    yedf = yedf[(yedf['date']==date)&(yedf['idx']>=threshold)][['src','dst']]
+
+    num_nodes = 64
+
+    x = dgl.graph((xedf.values[:,0],xedf.values[:,1]),num_nodes=64) 
+    x.ndata['feat'] = torch.Tensor(xndf[['precipitation','wind_gust','elevation']].values)
+    g = dgl.graph((yedf.values[:,0],yedf.values[:,1]))
+    u, v = g.edges()
+    
+    eids = np.arange(g.number_of_edges())
+    eids = np.random.permutation(eids)
+    test_size = int(len(eids) * 0.1)
+    train_size = g.number_of_edges() - test_size
+    test_pos_u, test_pos_v = u[eids[:test_size]], v[eids[:test_size]]
+    train_pos_u, train_pos_v = u[eids[test_size:]], v[eids[test_size:]]
+    
+    num_nodes = x.number_of_nodes()
+    self_edges = list(range(num_nodes))
+    # Find all negative edges and split them for training and testing
+    adj = sp.coo_matrix((np.ones(len(u)+num_nodes), (list(u.numpy())+self_edges, list(v.numpy())+self_edges)))
+    adj_neg = 1 - adj.todense()
+    neg_u, neg_v = np.where(adj_neg != 0)
+    
+    neg_eids = np.random.choice(len(neg_u), g.number_of_edges() // 2)
+    test_neg_u, test_neg_v = neg_u[neg_eids[:test_size]], neg_v[neg_eids[:test_size]]
+    train_neg_u, train_neg_v = neg_u[neg_eids[test_size:]], neg_v[neg_eids[test_size:]]
+    
+    train_g = x
+    train_pos_g = dgl.graph((train_pos_u, train_pos_v), num_nodes=64)
+    train_neg_g = dgl.graph((train_neg_u, train_neg_v), num_nodes=64)
+    test_pos_g = dgl.graph((test_pos_u, test_pos_v), num_nodes=64)
+    test_neg_g = dgl.graph((test_neg_u, test_neg_v), num_nodes=64)
+    
+    if save:
+        with open('data/ida_train_g.bin', 'wb')     as f: pkl.dump(train_g,     f)
+        with open('data/ida_train_pos_g.bin', 'wb') as f: pkl.dump(train_pos_g, f)
+        with open('data/ida_train_neg_g.bin', 'wb') as f: pkl.dump(train_neg_g, f)
+        with open('data/ida_test_pos_g.bin', 'wb')  as f: pkl.dump(test_pos_g,  f)
+        with open('data/ida_test_neg_g.bin', 'wb')  as f: pkl.dump(test_neg_g,  f)
+
+    if test:
+        return train_g, test_pos_g, test_neg_g
+    return train_g, train_pos_g, train_neg_g
+
 # def load_cora_graphs():
 def load_data(data_dir,test=False):
-    with open(path(data_dir,'train_g.bin'), 'rb') as f: train_g = pkl.load(f)
+    with open(path(data_dir,'ida_train_g.bin'), 'rb') as f: train_g = pkl.load(f)
     if test:
-        with open(path(data_dir,'test_pos_g.bin'), 'rb')  as f: test_pos_g  = pkl.load(f)
-        with open(path(data_dir,'test_neg_g.bin'), 'rb')  as f: test_neg_g  = pkl.load(f)
+        with open(path(data_dir,'ida_test_pos_g.bin'), 'rb')  as f: test_pos_g  = pkl.load(f)
+        with open(path(data_dir,'ida_test_neg_g.bin'), 'rb')  as f: test_neg_g  = pkl.load(f)
         return train_g, test_pos_g, test_neg_g
 
-    with open(path(data_dir,'train_pos_g.bin'), 'rb') as f: train_pos_g = pkl.load(f)
-    with open(path(data_dir,'train_neg_g.bin'), 'rb') as f: train_neg_g = pkl.load(f)
+    with open(path(data_dir,'ida_train_pos_g.bin'), 'rb') as f: train_pos_g = pkl.load(f)
+    with open(path(data_dir,'ida_train_neg_g.bin'), 'rb') as f: train_neg_g = pkl.load(f)
     return train_g, train_pos_g, train_neg_g
 
 

@@ -9,7 +9,7 @@ import dgl.function as fn
 from sklearn.metrics import roc_auc_score
 
 from Network import GraphSAGE
-from DataLoader import parse_data, load_data
+from DataLoader import parse_data, load_data, create_ida_graphs # TODO:REMOVE
 
 from os import path
 from itertools import chain
@@ -50,7 +50,7 @@ class MyModel(object):
         self.configs = configs
         self.name = name
 
-        self.network = GraphSAGE(configs,1433, 16).to(self._device)
+        self.network = GraphSAGE(configs,3,16).to(self._device)
         self.pred = DotPredictor()
 
         self.configs.silent = self.configs.wandb or self.configs.silent
@@ -81,7 +81,9 @@ class MyModel(object):
         #     #     # TODO: change to dgl
         #     #     valid_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=valid_transform)
         #     #     valid_data = torch.utils.data.DataLoader(valid_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
-        train_g, train_pos_g, train_neg_g = load_data(self.configs.data_directory)
+
+        # train_g, train_pos_g, train_neg_g = load_data(self.configs.data_directory)
+        train_g, train_pos_g, train_neg_g = create_ida_graphs()
         train_data = (train_pos_g, train_neg_g)
 
         # Wandb setup
@@ -177,47 +179,12 @@ class MyModel(object):
         return roc_auc_score(labels, scores)
 
     def evaluate(self, x=None, y=None, test_data=None):
-        # TODO:
+        # TODO: quality of life upgrades
         self.network.eval()
         self.pred.eval()
-        train_g, test_pos_g, test_neg_g = load_data(self.configs.data_directory,test=True)
+        train_g, test_pos_g, test_neg_g = create_ida_graphs(test=True)
         h = self.network(train_g, train_g.ndata['feat'])
         return self.roc_auc(h, test_pos_g, test_neg_g)
-        # from sklearn.metrics import roc_auc_score
-        # with torch.no_grad():
-        #     pos_score = pred(test_pos_g, h)
-        #     neg_score = pred(test_neg_g, h)
-        #     print('AUC', compute_auc(pos_score, neg_score))
-        return 0
-
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-        if self.configs.architecture == 'efficient': transform.transforms.insert(0,transforms.Resize(224))
-
-        if test_data is None:
-            # TODO: change to dgl
-            test_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=transform)
-            test_data = torch.utils.data.DataLoader(test_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
-        total_records = 0
-
-        # Set network to eval mode
-        self.network.eval()
-        
-        # Get predictions and return the percent correct as a decimal
-        if not self.configs.silent: print('--- Testing Start ---')
-        total_correct = 0
-        for x, label in test_data:
-            img, label = x.to(self._device), label.to(self._device)
-            p = self.predict(img)
-            total_records += p.shape[0]
-            total_correct += np.sum(p == label.detach().cpu().numpy())
-        if not self.configs.silent: print('--- Testing Complete ---')
-
-        accuracy = total_correct/total_records
-        if not self.configs.silent: print('Accuracy:',accuracy)
-        return accuracy
         
     def predict(self, x):
         # TODO:
