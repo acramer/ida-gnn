@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
@@ -7,10 +8,14 @@ import numpy as np
 import dgl.function as fn
 from sklearn.metrics import roc_auc_score
 
-from Network import MyNetwork
+from Network import GraphSAGE
 from DataLoader import parse_data, load_data
 
 from os import path
+from itertools import chain
+
+import warnings
+warnings.filterwarnings("ignore")
 
 class DotPredictor(nn.Module):
     def forward(self, g, h):
@@ -35,11 +40,6 @@ class MLPPredictor(nn.Module):
             g.apply_edges(self.apply_edges)
             return g.edata['score']
 
-def compute_auc(pos_score, neg_score):
-    scores = torch.cat([pos_score, neg_score]).numpy()
-    labels = torch.cat(
-        [torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])]).numpy()
-    return roc_auc_score(labels, scores)
 
 
 class MyModel(object):
@@ -50,46 +50,39 @@ class MyModel(object):
         self.configs = configs
         self.name = name
 
-        self.network = GraphSAGE(configs,train_g.ndata['feat'].shape[1], 16).to(self._device)
+        self.network = GraphSAGE(configs,1433, 16).to(self._device)
         self.pred = DotPredictor()
 
         self.configs.silent = self.configs.wandb or self.configs.silent
 
         # TODO: REMOVE
-        self.input_shape = input_shape
-        configs.input_shape = input_shape
+        # self.input_shape = input_shape
+        # configs.input_shape = input_shape
 
     def train(self, x_train=None, y_train=None, x_valid=None, y_valid=None):
 
-        transform=transforms.Compose([
-            transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-
-        valid_transform=transforms.Compose([
-            transforms.ToTensor(),
-            # transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-        ])
-
         # Import Data if None
-        if x_train is not None:
-            if self.configs.validation:
-                if x_valid is None:
-                    train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
-                else:
-                    train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
-                    train_data = parse_data(x_valid, y_valid, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
-            else: 
-                train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
-        else:
-            # TODO: change to dgl
-            train_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=True, download=True, transform=transform)
-            train_data = torch.utils.data.DataLoader(train_data, batch_size=self.configs.batch_size, shuffle=True, num_workers=2)
+        # if x_train is not None:
+        #     if self.configs.validation:
+        #         if x_valid is None:
+        #             train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
+        #         else:
+        #             train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
+        #             train_data = parse_data(x_valid, y_valid, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
+        #     else: 
+        #         train_data = parse_data(x_train, y_train, shape=self.input_shape, batch_size=self.configs.batch_size, transform=transform, train_ratio=1)
+        # else:
+        #     self.train_g, self.train_pos_g, self.train_neg_g, self.test_pos_g, self.test_neg_g = load_data()
+        #     # # TODO: change to dgl
+        #     # train_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=True, download=True, transform=transform)
+        #     # train_data = torch.utils.data.DataLoader(train_data, batch_size=self.configs.batch_size, shuffle=True, num_workers=2)
 
-            if self.configs.validation:
-                # TODO: change to dgl
-                valid_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=valid_transform)
-                valid_data = torch.utils.data.DataLoader(valid_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
+        #     # if self.configs.validation:
+        #     #     # TODO: change to dgl
+        #     #     valid_data = torchvision.datasets.CIFAR10(root=self.configs.data_directory, train=False, download=True, transform=valid_transform)
+        #     #     valid_data = torch.utils.data.DataLoader(valid_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
+        train_g, train_pos_g, train_neg_g = load_data(self.configs.data_directory)
+        train_data = (train_pos_g, train_neg_g)
 
         # Wandb setup
         if self.configs.wandb:
@@ -103,8 +96,8 @@ class MyModel(object):
         # num_steps_per_epoch = len(train_data)
 
         # Optimizer
-        if self.configs.adam: optimizer = torch.optim.Adam(itertools.chain(model.parameters(), pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay)
-        else:                 optimizer = torch.optim.SGD( itertools.chain(model.parameters(), pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay, momentum=0.9)
+        if self.configs.adam: optimizer = torch.optim.Adam(chain(self.network.parameters(), self.pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay)
+        else:                 optimizer = torch.optim.SGD( chain(self.network.parameters(), self.pred.parameters()), lr=self.configs.learning_rate, weight_decay=self.configs.weight_decay, momentum=0.9)
 
         # Step Scheduler
         if self.configs.step_schedule:
@@ -112,9 +105,9 @@ class MyModel(object):
             else:                   scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10)
 
         # Criterion
-        def loss(h):
-            pos_score = self.pred(train_pos_g, h)
-            neg_score = self.pred(train_neg_g, h)
+        def loss(h,pos_g,neg_g):
+            pos_score = self.pred(pos_g, h)
+            neg_score = self.pred(neg_g, h)
             scores = torch.cat([pos_score, neg_score])
             labels = torch.cat([torch.ones(pos_score.shape[0]), torch.zeros(neg_score.shape[0])])
             return F.binary_cross_entropy_with_logits(scores, labels)
@@ -129,40 +122,40 @@ class MyModel(object):
         for i in range(self.configs.epochs):
             total_loss = 0.0
             self.network.train()
+            self.pred.train()
             # Training Loop
-            for img, label in train_data:
-            for global_step in range(100):
-                # Compute loss
-                loss_val = loss(model(train_g, train_g.ndata['feat']))
-                # Compute total correct predictions
-                total_correct += np.sum(np.argmax(logit.detach().cpu().numpy(), axis=1) == label.cpu().numpy())
-                total_data += img.shape[0]
+            # for img, label in train_data:
+            # for global_step in range(100):
 
-                # Grad Step
-                optimizer.zero_grad()
-                loss_val.backward()
-                optimizer.step()
-                global_step += 1
-                total_loss += loss_val.item()
+            # Compute loss
+            h = self.network(train_g, train_g.ndata['feat'])
+            loss_val = loss(h,*train_data)
 
-                # Plot loss
-                if self.configs.wandb: wandb.log({"epoch":global_step/num_steps_per_epoch, "loss": loss_val.item()}, step=global_step)
+            # Grad Step
+            optimizer.zero_grad()
+            loss_val.backward()
+            optimizer.step()
+            total_loss += loss_val.item()
+
+            # Plot loss
+            if self.configs.wandb: wandb.log({"epoch":i, "loss": loss_val.item()}, step=i)
 
             # Step Learning Rate
             if self.configs.step_schedule:
                 if self.configs.cosine: scheduler.step()
                 else:                   scheduler.step(total_loss)
 
-            # TODO Compute ROC
+            # Compute ROC
+            ra_score = self.roc_auc(h,train_pos_g,train_neg_g)
 
             # Print if no logger
             if self.configs.wandb:
-                # wandb.log({"training accuracy":train_accuracy}, step=global_step)
+                wandb.log({"ROC Score":ra_score}, step=i)
                 # if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)
             elif not self.configs.silent: 
-                print('Epoch: {:4d} -- Training Loss: {:10.6f}'.format(i, total_loss, train_accuracy), end='' if self.configs.validation else '\n')
-                if self.configs.validation: print(' -- Generalization: {:10.6f}'.format(generalization))
+                print('Epoch: {:4d} -- Training Loss: {:10.6f} -- ROC Score: {:10.6f}'.format(i, total_loss, ra_score), end='' if self.configs.validation else '\n')
+                # if self.configs.validation: print(' -- Generalization: {:10.6f}'.format(generalization))
 
             if self.configs.save_interval is not None and self.configs.save_interval > 0 and i % self.configs.save_interval == 0 and i+1 < self.configs.epochs:
                 self.save('i{}'.format(i))
@@ -173,8 +166,23 @@ class MyModel(object):
         elif not self.configs.silent: print("Saved: False")
         if not self.configs.silent: print("--- Training Complete ---")
 
+    def roc_auc(self,h,pos_g,neg_g):
+        self.network.eval()
+        self.pred.eval()
+        pscore = self.pred(pos_g, h).detach()
+        nscore = self.pred(neg_g, h).detach()
+        labels = torch.cat([torch.ones( pscore.shape[0]),
+                            torch.zeros(nscore.shape[0])]).numpy()
+        scores = torch.cat([pscore, nscore]).numpy()
+        return roc_auc_score(labels, scores)
+
     def evaluate(self, x=None, y=None, test_data=None):
         # TODO:
+        self.network.eval()
+        self.pred.eval()
+        train_g, test_pos_g, test_neg_g = load_data(self.configs.data_directory,test=True)
+        h = self.network(train_g, train_g.ndata['feat'])
+        return self.roc_auc(h, test_pos_g, test_neg_g)
         # from sklearn.metrics import roc_auc_score
         # with torch.no_grad():
         #     pos_score = pred(test_pos_g, h)
@@ -222,7 +230,7 @@ class MyModel(object):
         from pathlib import Path
 
         # Save the configuration so that at load, different configs will not stop loading
-        # TODO: add pred
+        # TODO: add self.pred
         checkpoint = {'configs':          self.configs,
                       'model_state_dict': self.network.state_dict()}
 
@@ -250,7 +258,7 @@ class MyModel(object):
 
         checkpoint = load(path.join(path.dirname(path.abspath(__file__)), filePath), map_location='cpu')
         update_configs(checkpoint['configs'])
-        # TODO: add pred
+        # TODO: add self.pred
         self.network = MyNetwork(self.configs).to(self._device)
         self.network.load_state_dict(checkpoint['model_state_dict'])
         return self.configs
