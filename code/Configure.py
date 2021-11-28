@@ -24,6 +24,9 @@ default_configs = {
     'save_interval':     {'default': None,
                           'flags':   ['--save_int', '-S'],
                           'argparse':{'type':int,'help':'Save Interval in epochs.  A value of 0 saves at completion only.  All valid interval values save on completion in model.th in specified directory.'}},
+    'window_size':       {'default': 9,
+                          'flags':   ['--window_size', '-w'],
+                          'argparse':{'type':int}},
 
     'step_schedule':     {'default': False,
                           'flags':   ['--step_schedule', '-s'],

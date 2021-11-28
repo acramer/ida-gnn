@@ -50,7 +50,8 @@ class MyModel(object):
         self.configs = configs
         self.name = name
 
-        self.network = GraphSAGE(configs,3,16).to(self._device)
+        # self.network = GraphSAGE(configs,3,16).to(self._device)
+        self.network = GraphSAGE(configs,1+2*configs.window_size,16).to(self._device)
         self.pred = DotPredictor()
 
         self.configs.silent = self.configs.wandb or self.configs.silent
@@ -157,6 +158,7 @@ class MyModel(object):
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)
             elif not self.configs.silent: 
                 print('Epoch: {:4d} -- Training Loss: {:10.6f} -- ROC Score: {:10.6f}'.format(i, total_loss, ra_score), end='' if self.configs.validation else '\n')
+                if self.configs.validation: print()
                 # if self.configs.validation: print(' -- Generalization: {:10.6f}'.format(generalization))
 
             if self.configs.save_interval is not None and self.configs.save_interval > 0 and i % self.configs.save_interval == 0 and i+1 < self.configs.epochs:

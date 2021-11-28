@@ -51,18 +51,21 @@ def create_cora_graphs(save=False):
     
     return train_g, train_pos_g, train_neg_g, test_pos_g, test_neg_g
 
-def create_ida_graphs(date='08/27/2021',threshold=0.07,date_offset=0,test=False,save=False):
+def create_ida_graphs(date='08/27/2021',threshold=0.07,date_offset=0,test=False,save=False,window_size=9):
+    assert date in DATES and DATE2NUM[date] + window_size <= len(DATES)
     xndf = pd.read_csv('data/X_nodes.csv')
     xedf = pd.read_csv('data/X_edges.csv')
     yedf = pd.read_csv('data/Y_edges.csv')
 
-    xndf = xndf[xndf['date']==date]
+    # xndf = xndf[xndf['date']==date]
     yedf = yedf[(yedf['date']==date)&(yedf['idx']>=threshold)][['src','dst']]
 
     num_nodes = 64
 
     x = dgl.graph((xedf.values[:,0],xedf.values[:,1]),num_nodes=64) 
-    x.ndata['feat'] = torch.Tensor(xndf[['precipitation','wind_gust','elevation']].values)
+    node_data  = [torch.Tensor(xndf[xndf['date']==date][['elevation']].values)]
+    node_data += [torch.Tensor(xndf[xndf['date']==NUM2DATE[d]][['precipitation','wind_gust']].values) for d in range(DATE2NUM[date],DATE2NUM[date]+window_size)]
+    x.ndata['feat'] = torch.cat(node_data,dim=1)
     g = dgl.graph((yedf.values[:,0],yedf.values[:,1]))
     u, v = g.edges()
     
@@ -239,3 +242,45 @@ def load_fake_data(fnum=10,fclass=4,fshape=(32,32,3)):
     fx = np.round(fx)
     fx = fx.astype('uint8')
     return fx, fy
+
+
+DATES = ['08/22/2021',
+         '08/23/2021',
+         '08/24/2021',
+         '08/25/2021',
+         '08/26/2021',
+         '08/27/2021',
+         '08/28/2021',
+         '08/29/2021',
+         '08/30/2021',
+         '08/31/2021',
+         '09/01/2021',
+         '09/02/2021',
+         '09/03/2021',
+         '09/04/2021',
+         '09/05/2021',
+         '09/06/2021',
+         '09/07/2021',
+         '09/08/2021',
+         '09/09/2021',
+         '09/10/2021',
+         '09/11/2021',
+         '09/12/2021',
+         '09/13/2021',
+         '09/14/2021',
+         '09/15/2021',
+         '09/16/2021',
+         '09/17/2021',
+         '09/18/2021',
+         '09/19/2021',
+         '09/20/2021',
+         '09/21/2021',
+         '09/22/2021',
+         '09/23/2021',
+         '09/24/2021',
+         '09/25/2021',
+         '09/26/2021',
+         '09/27/2021']
+DATE2NUM = dict(zip(DATES,range(len(DATES))))
+NUM2DATE = dict(zip(range(len(DATES)),DATES))
+
