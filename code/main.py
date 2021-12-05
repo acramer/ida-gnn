@@ -2,7 +2,7 @@ import torch
 import os
 import numpy as np
 from Model import MyModel
-from DataLoader import load_fake_data, load_testing_images
+# from DataLoader import load_fake_data, load_testing_images
 from Configure import parse_configs, print_configs
 
 # -------------------------------------------
@@ -10,33 +10,33 @@ from Configure import parse_configs, print_configs
 # -------------------------------------------
 def network_correctness(configs):
     return True
-    # "self.input_shape" is used in prediction to verify shape of input.  It changed
-    #   here to allow correctness testing to use as small of data as possible and to be as fast as possible.
-    num_data = 12
-    num_classes = 3
-    # fake_input_shape = (5, 5, 2)
-    fake_input_shape = (32, 32, 3)
+    # # "self.input_shape" is used in prediction to verify shape of input.  It changed
+    # #   here to allow correctness testing to use as small of data as possible and to be as fast as possible.
+    # num_data = 12
+    # num_classes = 3
+    # # fake_input_shape = (5, 5, 2)
+    # fake_input_shape = (32, 32, 3)
 
-    configs.epochs = 100
-    configs.batch_size = num_data
-    configs.learning_rate = 0.001
-    configs.adam = True
-    configs.step_schedule = True
-    #configs.data_augmentation = False
-    configs.save_interval = None
-    configs.wandb = False
-    #configs.silent = True
-    configs.validation = False
-    configs.num_classes = num_classes
-    configs.num_channels = fake_input_shape[2]
+    # configs.epochs = 100
+    # configs.batch_size = num_data
+    # configs.learning_rate = 0.001
+    # configs.adam = True
+    # configs.step_schedule = True
+    # #configs.data_augmentation = False
+    # configs.save_interval = None
+    # configs.wandb = False
+    # #configs.silent = True
+    # configs.validation = False
+    # configs.num_classes = num_classes
+    # configs.num_channels = fake_input_shape[2]
 
-    x_fake, y_fake = load_fake_data(num_data,num_classes,fake_input_shape)
-    model = MyModel(configs, input_shape=fake_input_shape)
-    model.train(x_fake, y_fake)
-    res = model.evaluate(x_fake, y_fake)
-    print(res)
-    # return model.evaluate(x_fake, y_fake) > (1 - 1/num_classes)
-    return res > (1.5/num_classes)
+    # x_fake, y_fake = load_fake_data(num_data,num_classes,fake_input_shape)
+    # model = MyModel(configs, input_shape=fake_input_shape)
+    # model.train(x_fake, y_fake)
+    # res = model.evaluate(x_fake, y_fake)
+    # print(res)
+    # # return model.evaluate(x_fake, y_fake) > (1 - 1/num_classes)
+    # return res > (1.5/num_classes)
 
 # Given a directory of model folders of the form "<NUM>_<DESCRIPTION>", creates and returns a new folder
 #   with the number incremented and description optionaly included.
@@ -58,6 +58,43 @@ def generate_model_id(directory, des=''):
 
     os.mkdir(directory+'/'+description)
     return description
+
+
+def gen_prediction():
+    import pickle as pkl
+    import pandas as pd
+    with open('data/saved_config.pkl','rb') as f:
+        configs = pkl.load(f)
+
+    model = MyModel(configs)
+    model.train()
+    rscore, thresh = model.evaluate()
+    print(rscore)
+    x = model.predict().detach().numpy()
+
+    X = np.dot(x,np.transpose(x)) > thresh
+
+    edges = []
+    for r in range(64):
+        for c in range(r+1,64):
+            if X[r,c]:
+                edges.append((r,c))
+
+    pd.DataFrame(edges,columns=['src','dst']).to_csv('data/predictions.csv',index=False)
+    df = pd.read_csv('data/predictions.csv')
+    print(df)
+
+def save_configs(configs)
+    import pickle as pkl
+
+    print_configs(configs)
+
+    with open('data/saved_config.pkl','wb') as f:
+        pkl.dump(configs,f)
+    with open('data/saved_config.pkl','rb') as f:
+        configs = pkl.load(f)
+
+    print_configs(configs)
 
 
 # -------------------------------------------

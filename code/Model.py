@@ -6,10 +6,11 @@ import torchvision.transforms as transforms
 import numpy as np
 
 import dgl.function as fn
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score,roc_curve
 
 from Network import GraphSAGE
-from DataLoader import parse_data, load_data, create_ida_graphs # TODO:REMOVE
+# from DataLoader import parse_data, load_data
+from DataLoader import create_ida_graphs # TODO:REMOVE
 
 from os import path
 from itertools import chain
@@ -56,6 +57,9 @@ class MyModel(object):
 
         self.configs.silent = self.configs.wandb or self.configs.silent
 
+        # self.train_data, self.valid_data, self.test_data = create_ida_graphs(valid=True)
+        self.train_data, self.test_data = create_ida_graphs()
+
         # TODO: REMOVE
         # self.input_shape = input_shape
         # configs.input_shape = input_shape
@@ -84,8 +88,8 @@ class MyModel(object):
         #     #     valid_data = torch.utils.data.DataLoader(valid_data, batch_size=self.configs.batch_size, shuffle=False, num_workers=2)
 
         # train_g, train_pos_g, train_neg_g = load_data(self.configs.data_directory)
-        train_g, train_pos_g, train_neg_g = create_ida_graphs()
-        train_data = (train_pos_g, train_neg_g)
+        # train_g, train_pos_g, train_neg_g = create_ida_graphs()
+        # train_data = (train_pos_g, train_neg_g)
 
         # Wandb setup
         if self.configs.wandb:
@@ -124,21 +128,19 @@ class MyModel(object):
         # Epoch Loop
         for i in range(self.configs.epochs):
             total_loss = 0.0
-            self.network.train()
-            self.pred.train()
-            # Training Loop
-            # for img, label in train_data:
-            # for global_step in range(100):
+            for x,p,n in self.train_data:
+                self.network.train()
+                self.pred.train()
 
-            # Compute loss
-            h = self.network(train_g, train_g.ndata['feat'])
-            loss_val = loss(h,*train_data)
+                # Compute loss
+                h = self.network(x,x.ndata['feat'])
+                loss_val = loss(h,p,n)
 
-            # Grad Step
-            optimizer.zero_grad()
-            loss_val.backward()
-            optimizer.step()
-            total_loss += loss_val.item()
+                # Grad Step
+                optimizer.zero_grad()
+                loss_val.backward()
+                optimizer.step()
+                total_loss += loss_val.item()
 
             # Plot loss
             if self.configs.wandb: wandb.log({"epoch":i, "loss": loss_val.item()}, step=i)
@@ -149,17 +151,23 @@ class MyModel(object):
                 else:                   scheduler.step(total_loss)
 
             # Compute ROC
-            ra_score = self.roc_auc(h,train_pos_g,train_neg_g)
+            ra_score = self.roc_auc(h,p,n)
+            if self.configs.validation:
+                valid_ra_score = 0
+                for vx,vp,vn in self.test_data:
+                    vh = self.network(vx,vx.ndata['feat'])
+                    valid_ra_score += self.roc_auc(vh,vp,vn)
+                valid_ra_score /= len(self.test_data)
 
             # Print if no logger
             if self.configs.wandb:
                 wandb.log({"ROC Score":ra_score}, step=i)
-                # if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
+                if self.configs.validation: wandb.log({'validation accuracy':valid_accuracy, "generalization":generalization}, step=global_step)
                 if self.configs.step_schedule: wandb.log({'learning rate':optimizer.param_groups[0]['lr']}, step=global_step)
             elif not self.configs.silent: 
                 print('Epoch: {:4d} -- Training Loss: {:10.6f} -- ROC Score: {:10.6f}'.format(i, total_loss, ra_score), end='' if self.configs.validation else '\n')
-                if self.configs.validation: print()
-                # if self.configs.validation: print(' -- Generalization: {:10.6f}'.format(generalization))
+                # if self.configs.validation: print()
+                if self.configs.validation: print(' | {:10.6f}'.format(valid_ra_score))
 
             if self.configs.save_interval is not None and self.configs.save_interval > 0 and i % self.configs.save_interval == 0 and i+1 < self.configs.epochs:
                 self.save('i{}'.format(i))
@@ -170,7 +178,7 @@ class MyModel(object):
         elif not self.configs.silent: print("Saved: False")
         if not self.configs.silent: print("--- Training Complete ---")
 
-    def roc_auc(self,h,pos_g,neg_g):
+    def roc_auc(self,h,pos_g,neg_g,curve=False):
         self.network.eval()
         self.pred.eval()
         pscore = self.pred(pos_g, h).detach()
@@ -178,20 +186,36 @@ class MyModel(object):
         labels = torch.cat([torch.ones( pscore.shape[0]),
                             torch.zeros(nscore.shape[0])]).numpy()
         scores = torch.cat([pscore, nscore]).numpy()
-        return roc_auc_score(labels, scores)
+        score = roc_auc_score(labels, scores)
+        if curve:
+            return score, roc_curve(labels, scores)
+        return score
+
+    def calc_thresh(self,fp,tp,thresh):
+        import pandas as pd
+        roc = pd.DataFrame({'tf' : pd.Series(tp-(1-fp), index=np.arange(len(tp))), 'threshold' : pd.Series(thresh, index=np.arange(len(tp)))})
+        roc_t = roc.iloc[(roc.tf-0).abs().argsort()[:1]]
+
+        return list(roc_t['threshold']) 
 
     def evaluate(self, x=None, y=None, test_data=None):
         # TODO: quality of life upgrades
+        test_data = test_data if test_data else self.test_data 
         self.network.eval()
         self.pred.eval()
-        train_g, test_pos_g, test_neg_g = create_ida_graphs(test=True)
-        h = self.network(train_g, train_g.ndata['feat'])
-        return self.roc_auc(h, test_pos_g, test_neg_g)
+        score = 0
+        for x,p,n in self.test_data:
+            h = self.network(x, x.ndata['feat'])
+            rscore,(fp,tp,thresh) = self.roc_auc(h,p,n,curve=True)
+            score += rscore
+        return score/len(self.test_data), self.calc_thresh(fp,tp,thresh)
         
-    def predict(self, x):
-        # TODO:
-        # return np.argmax(self._predict_logit(self.network(x).detach().cpu().numpy()), axis=1)
-        return None
+    def predict(self, x=None):
+        if x is None:
+            for g,_,_ in self.test_data:
+                pass
+            return self.network(g,g.ndata['feat'])
+        return self.network(x, x.ndata['feat'])
 
     def save(self, des=''):
         from torch import save
